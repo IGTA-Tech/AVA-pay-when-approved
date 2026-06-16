@@ -1,0 +1,408 @@
+{
+  "name": "Pay When Approved — Workflow 2: Approved → Charge",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Cases",
+          "mode": "name"
+        },
+        "event": "rowUpdate",
+        "options": {
+          "valueRender": "FORMATTED_VALUE"
+        }
+      },
+      "id": "sheets-trigger",
+      "name": "On row update in Sheet",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "status-approved",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "approved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "not-charged-yet",
+              "leftValue": "={{ $json.charged_at }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty"
+              }
+            },
+            {
+              "id": "has-customer",
+              "leftValue": "={{ $json.stripe_customer_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "has-payment-method",
+              "leftValue": "={{ $json.stripe_payment_method_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "should-charge",
+      "name": "Is approved & not charged?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/payment_intents",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "amount", "value": "={{ $json.amount_due_cents || 300000 }}" },
+            { "name": "currency", "value": "usd" },
+            { "name": "customer", "value": "={{ $json.stripe_customer_id }}" },
+            { "name": "payment_method", "value": "={{ $json.stripe_payment_method_id }}" },
+            { "name": "off_session", "value": "true" },
+            { "name": "confirm", "value": "true" },
+            { "name": "description", "value": "Pay When Approved — I-797 approved" },
+            { "name": "metadata[case_id]", "value": "={{ $json.case_id }}" },
+            { "name": "metadata[beneficiary_name]", "value": "={{ $json.beneficiary_name }}" },
+            { "name": "metadata[case_reference]", "value": "={{ $json.case_reference }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "=charge-{{ $json.case_id }}-{{ $json.stripe_customer_id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "charge-card",
+      "name": "Charge saved card",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 220],
+      "credentials": {
+        "stripeApi": {
+          "id": "REPLACE_WITH_YOUR_STRIPE_CREDENTIAL_ID",
+          "name": "Stripe account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "succeeded",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "charge-result",
+      "name": "Charge succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Cases",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "case_id": "={{ $('On row update in Sheet').item.json.case_id }}",
+            "status": "paid",
+            "charged_at": "={{ $now.toISO() }}",
+            "payment_intent_id": "={{ $('Charge saved card').item.json.id }}",
+            "notes": "Charged automatically by n8n"
+          },
+          "matchingColumns": ["case_id"],
+          "schema": [
+            { "id": "case_id", "displayName": "case_id", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" },
+            { "id": "charged_at", "displayName": "charged_at", "type": "string" },
+            { "id": "payment_intent_id", "displayName": "payment_intent_id", "type": "string" },
+            { "id": "notes", "displayName": "notes", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-sheet-success",
+      "name": "Update sheet → paid",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 140],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('On row update in Sheet').item.json.customer_email }}",
+        "subject": "Payment received — your I-797 has been approved",
+        "emailType": "text",
+        "message": "=Hi {{ $('On row update in Sheet').item.json.customer_name }},\n\nCongratulations on your I-797 approval!\n\nAs agreed under the Pay When Approved plan, we have charged your card on file:\n\nAmount: ${{ ($('On row update in Sheet').item.json.amount_due_cents / 100).toFixed(2) }}\nCard: {{ $('On row update in Sheet').item.json.card_brand }} ending in {{ $('On row update in Sheet').item.json.card_last4 }}\nDate: {{ $now.toFormat('LLLL d, yyyy') }}\nReceipt ID: {{ $('Charge saved card').item.json.id }}\n\nA detailed receipt has been emailed to you separately by Stripe.\n\nThank you for choosing Aventus Visa Agents.\n\n— The Aventus team",
+        "options": {}
+      },
+      "id": "email-customer-success",
+      "name": "Email customer (success)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1340, 60],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "admin@aventusvisaagents.com",
+        "subject": "✅ Charged: {{ $('On row update in Sheet').item.json.customer_name }} — ${{ ($('On row update in Sheet').item.json.amount_due_cents / 100).toFixed(2) }}",
+        "emailType": "text",
+        "message": "=Pay When Approved charge succeeded.\n\nCustomer: {{ $('On row update in Sheet').item.json.customer_name }} ({{ $('On row update in Sheet').item.json.customer_email }})\nBeneficiary: {{ $('On row update in Sheet').item.json.beneficiary_name }}\nCase reference: {{ $('On row update in Sheet').item.json.case_reference }}\nAmount: ${{ ($('On row update in Sheet').item.json.amount_due_cents / 100).toFixed(2) }}\nCard: {{ $('On row update in Sheet').item.json.card_brand }} ····{{ $('On row update in Sheet').item.json.card_last4 }}\nPayment Intent: {{ $('Charge saved card').item.json.id }}\nStripe Customer: {{ $('On row update in Sheet').item.json.stripe_customer_id }}",
+        "options": {}
+      },
+      "id": "email-admin-success",
+      "name": "Email admin (success)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1340, 220],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Cases",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "case_id": "={{ $('On row update in Sheet').item.json.case_id }}",
+            "status": "payment_failed",
+            "notes": "=Charge failed: {{ $('Charge saved card').item.json.error.message || $('Charge saved card').item.json.error.code || 'unknown error' }}"
+          },
+          "matchingColumns": ["case_id"],
+          "schema": [
+            { "id": "case_id", "displayName": "case_id", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" },
+            { "id": "notes", "displayName": "notes", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-sheet-failure",
+      "name": "Update sheet → failed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "admin@aventusvisaagents.com",
+        "subject": "⚠️ Charge FAILED: {{ $('On row update in Sheet').item.json.customer_name }}",
+        "emailType": "text",
+        "message": "=Pay When Approved charge FAILED.\n\nCustomer: {{ $('On row update in Sheet').item.json.customer_name }} ({{ $('On row update in Sheet').item.json.customer_email }})\nBeneficiary: {{ $('On row update in Sheet').item.json.beneficiary_name }}\nAmount: ${{ ($('On row update in Sheet').item.json.amount_due_cents / 100).toFixed(2) }}\nCard: {{ $('On row update in Sheet').item.json.card_brand }} ····{{ $('On row update in Sheet').item.json.card_last4 }}\n\nError: {{ $('Charge saved card').item.json.error.message || 'unknown' }}\nDecline code: {{ $('Charge saved card').item.json.error.decline_code || 'n/a' }}\n\nNext steps:\n  1. Contact the customer to update their card\n  2. Once new card on file, reset the row's status to 'approved' to retry\n\nStripe Customer: {{ $('On row update in Sheet').item.json.stripe_customer_id }}",
+        "options": {}
+      },
+      "id": "email-admin-failure",
+      "name": "Email admin (failure)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1340, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On row update in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Is approved & not charged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is approved & not charged?": {
+      "main": [
+        [
+          {
+            "node": "Charge saved card",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Charge saved card": {
+      "main": [
+        [
+          {
+            "node": "Charge succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Charge succeeded?": {
+      "main": [
+        [
+          {
+            "node": "Update sheet → paid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update sheet → failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update sheet → paid": {
+      "main": [
+        [
+          {
+            "node": "Email customer (success)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email admin (success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update sheet → failed": {
+      "main": [
+        [
+          {
+            "node": "Email admin (failure)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

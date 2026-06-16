@@ -1,0 +1,197 @@
+{
+  "name": "Pay When Approved — Workflow 1: New Customer → Sheet",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-customer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (from Vercel)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "new-customer-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-customer-id",
+              "leftValue": "={{ $json.body.customer_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "has-payment-method",
+              "leftValue": "={{ $json.body.payment_method_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "validate-payload",
+      "name": "Validate payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Cases",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "case_id": "={{ $('Webhook (from Vercel)').item.json.body.session_id }}",
+            "created_at": "={{ $('Webhook (from Vercel)').item.json.body.created_at }}",
+            "customer_name": "={{ $('Webhook (from Vercel)').item.json.body.customer_name }}",
+            "customer_email": "={{ $('Webhook (from Vercel)').item.json.body.customer_email }}",
+            "customer_phone": "={{ $('Webhook (from Vercel)').item.json.body.customer_phone }}",
+            "beneficiary_name": "={{ $('Webhook (from Vercel)').item.json.body.beneficiary_name }}",
+            "case_reference": "={{ $('Webhook (from Vercel)').item.json.body.case_reference }}",
+            "stripe_customer_id": "={{ $('Webhook (from Vercel)').item.json.body.customer_id }}",
+            "stripe_payment_method_id": "={{ $('Webhook (from Vercel)').item.json.body.payment_method_id }}",
+            "card_brand": "={{ $('Webhook (from Vercel)').item.json.body.card_brand }}",
+            "card_last4": "={{ $('Webhook (from Vercel)').item.json.body.card_last4 }}",
+            "card_exp": "={{ $('Webhook (from Vercel)').item.json.body.card_exp_month }}/{{ $('Webhook (from Vercel)').item.json.body.card_exp_year }}",
+            "amount_due_cents": "={{ $('Webhook (from Vercel)').item.json.body.amount_due_on_approval_cents }}",
+            "status": "pending",
+            "charged_at": "",
+            "payment_intent_id": "",
+            "notes": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "case_id", "displayName": "case_id", "type": "string" },
+            { "id": "created_at", "displayName": "created_at", "type": "string" },
+            { "id": "customer_name", "displayName": "customer_name", "type": "string" },
+            { "id": "customer_email", "displayName": "customer_email", "type": "string" },
+            { "id": "customer_phone", "displayName": "customer_phone", "type": "string" },
+            { "id": "beneficiary_name", "displayName": "beneficiary_name", "type": "string" },
+            { "id": "case_reference", "displayName": "case_reference", "type": "string" },
+            { "id": "stripe_customer_id", "displayName": "stripe_customer_id", "type": "string" },
+            { "id": "stripe_payment_method_id", "displayName": "stripe_payment_method_id", "type": "string" },
+            { "id": "card_brand", "displayName": "card_brand", "type": "string" },
+            { "id": "card_last4", "displayName": "card_last4", "type": "string" },
+            { "id": "card_exp", "displayName": "card_exp", "type": "string" },
+            { "id": "amount_due_cents", "displayName": "amount_due_cents", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" },
+            { "id": "charged_at", "displayName": "charged_at", "type": "string" },
+            { "id": "payment_intent_id", "displayName": "payment_intent_id", "type": "string" },
+            { "id": "notes", "displayName": "notes", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "append-to-sheet",
+      "name": "Append row to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [680, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ok\": true,\n  \"message\": \"Row added\"\n}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ok\": false,\n  \"error\": \"Missing customer_id or payment_method_id in payload\"\n}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 400]
+    }
+  ],
+  "connections": {
+    "Webhook (from Vercel)": {
+      "main": [
+        [
+          {
+            "node": "Validate payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate payload": {
+      "main": [
+        [
+          {
+            "node": "Append row to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
