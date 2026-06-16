@@ -10,9 +10,14 @@ import { stripe, PLAN_AMOUNT_CENTS, PLAN_CURRENCY, PLAN_LABEL } from "@/lib/stri
  *
  * Stripe will redirect them back to SUCCESS_URL (Squarespace thank-you page)
  * after they save their card.
+ *
+ * NOTE: Terms of Service consent is collected via a separate Squarespace
+ * agreement page before the customer reaches this endpoint. We do NOT use
+ * Stripe's built-in consent_collection because it requires a Dashboard-side
+ * Terms URL that's gated behind full business profile completion.
  */
 export async function GET(request: Request) {
-  try { 
+  try {
     const successUrl =
       process.env.SUCCESS_URL ??
       "https://www.aventusvisaagents.com/pay-when-approved-thank-you";
@@ -27,11 +32,6 @@ export async function GET(request: Request) {
 
       success_url: `${successUrl}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancelUrl,
-
-      // Show terms checkbox (requires ToS URL configured in Stripe Dashboard)
-      consent_collection: {
-        terms_of_service: "required",
-      },
 
       // Custom fields the customer fills in alongside their card
       custom_fields: [
