@@ -12,7 +12,7 @@ import { stripe, PLAN_AMOUNT_CENTS, PLAN_CURRENCY, PLAN_LABEL } from "@/lib/stri
  * after they save their card.
  */
 export async function GET(request: Request) {
-  try {
+  try { 
     const successUrl =
       process.env.SUCCESS_URL ??
       "https://www.aventusvisaagents.com/pay-when-approved-thank-you";
