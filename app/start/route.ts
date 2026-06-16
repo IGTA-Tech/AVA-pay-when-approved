@@ -11,10 +11,15 @@ import { stripe, PLAN_AMOUNT_CENTS, PLAN_CURRENCY, PLAN_LABEL } from "@/lib/stri
  * Stripe will redirect them back to SUCCESS_URL (Squarespace thank-you page)
  * after they save their card.
  *
- * NOTE: Terms of Service consent is collected via a separate Squarespace
- * agreement page before the customer reaches this endpoint. We do NOT use
- * Stripe's built-in consent_collection because it requires a Dashboard-side
- * Terms URL that's gated behind full business profile completion.
+ * NOTE: Stripe's `setup` mode is intentionally minimal. It does NOT support:
+ *   - consent_collection (terms checkbox)
+ *   - custom_fields (extra form fields)
+ *   - submit_type
+ * These all require `mode=payment` or `mode=subscription`. Any additional
+ * customer info (beneficiary name, case reference, terms agreement) must be
+ * collected on a Squarespace agreement page BEFORE the customer reaches this
+ * endpoint. The data can be passed via URL query params and stored in the
+ * session metadata.
  */
 export async function GET(request: Request) {
   try {
@@ -25,43 +30,34 @@ export async function GET(request: Request) {
       process.env.CANCEL_URL ??
       "https://www.aventusvisaagents.com/petitioner-signup-page";
 
+    // Read optional pre-filled info from query params
+    // Example: /start?email=x@y.com&beneficiary=Jane&case_ref=ABC123
+    const url = new URL(request.url);
+    const customerEmail = url.searchParams.get("email") ?? undefined;
+    const beneficiaryName = url.searchParams.get("beneficiary") ?? "";
+    const caseReference = url.searchParams.get("case_ref") ?? "";
+
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
       payment_method_types: ["card"],
       customer_creation: "always",
 
+      // Pre-fill the email field on the Stripe page if provided
+      ...(customerEmail ? { customer_email: customerEmail } : {}),
+
       success_url: `${successUrl}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancelUrl,
 
-      // Custom fields the customer fills in alongside their card
-      custom_fields: [
-        {
-          key: "beneficiary_name",
-          label: {
-            type: "custom",
-            custom: "Beneficiary (visa applicant) full name",
-          },
-          type: "text",
-          optional: false,
-        },
-        {
-          key: "case_reference",
-          label: {
-            type: "custom",
-            custom: "Internal case reference (leave blank if unsure)",
-          },
-          type: "text",
-          optional: true,
-        },
-      ],
-
       // Metadata for tracking — visible in Stripe Dashboard and webhooks
+      // This data flows through to n8n and the Google Sheet
       metadata: {
         plan: "pay_when_approved",
         amount_due_on_approval: String(PLAN_AMOUNT_CENTS),
         currency: PLAN_CURRENCY,
         plan_label: PLAN_LABEL,
         source: "squarespace",
+        beneficiary_name: beneficiaryName,
+        case_reference: caseReference,
       },
     });
 
